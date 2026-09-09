@@ -303,7 +303,16 @@ jobs:
             for pkg in $WASM_PACKAGES; do scope+=(-p "$pkg"); done
           fi
           feats=()
-          [ -n "$WASM_FEATURES" ] && feats=(--features "$WASM_FEATURES")
+          if [ -n "$WASM_FEATURES" ]; then
+            if [ -n "${WASM_PACKAGES// /}" ]; then
+              # A feature named for a `-p` member from a virtual workspace root must be
+              # spelled `package/feature`, or cargo refuses ("cannot specify features
+              # for packages outside of workspace").
+              for pkg in $WASM_PACKAGES; do for f in $WASM_FEATURES; do feats+=(--features "$pkg/$f"); done; done
+            else
+              feats=(--features "$WASM_FEATURES")
+            fi
+          fi
           cargo clippy "${scope[@]}" --lib --target wasm32-unknown-unknown "${feats[@]}" -- -D warnings
 
   wasm-check:
