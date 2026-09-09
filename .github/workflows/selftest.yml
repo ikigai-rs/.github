@@ -1,0 +1,35 @@
+# selftest.yml — rust.yml gates ITSELF.
+#
+# Every caller in the org depends on rust.yml@main, so a bad merge here breaks
+# every repo at once. This runs the reusable workflow, on every push and PR to
+# this repo, against fixtures/selftest with EVERY input switched on — so every
+# job rust.yml can emit runs on every change to it. A PR here merges on a green
+# verdict of exactly the checks a caller would see.
+#
+# The job id is `ci` on purpose: check names are `<caller job id> / <job name>`,
+# so this run shows the names every migrated repo will show — `ci / doc`,
+# `ci / features: extra`, `ci / msrv 1.80` — and verdict.sh sees the real thing.
+name: selftest
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: selftest-${{ github.ref }}
+  # Never cancel a main run: a main commit without a verdict is the bug that
+  # `cancel-in-progress: true` planted in two repos.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  ci:
+    uses: ./.github/workflows/rust.yml
+    with:
+      path: fixtures/selftest
+      features: "extra *"
+      wasm-lib: true
+      wasm-features: extra
+      wasm-check: true
+      macos: true
+      test-args: --all-targets

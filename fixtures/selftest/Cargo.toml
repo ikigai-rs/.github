@@ -1,0 +1,15 @@
+# The selftest fixture: the smallest workspace that makes every job rust.yml can
+# emit actually run. Two crates, on purpose — a single crate cannot exercise
+# `--workspace` semantics (a feature that only one member declares, a
+# `rust-version` that only one member sets).
+#
+#   wasmlib   — wasm-clean lib; feature `extra` gates a binary through
+#               `required-features`, the target `--all-targets` cannot see (§9c).
+#   doctested — a doctest (the thing `cargo test --all-targets` silently skips)
+#               and a `rust-version`, so the msrv job has something to read.
+#
+# Keep it this small. It is built on every change to rust.yml, on three
+# toolchains and two targets, and every caller in the org waits on it.
+[workspace]
+resolver = "2"
+members = ["crates/wasmlib", "crates/doctested"]
