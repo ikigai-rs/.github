@@ -55,6 +55,10 @@
 #                  wasm32-unknown-unknown. The module crates' gate.
 #   wasm-features  Features for the wasm-lib job only (jsonld and xslt lint their
 #                  wasm face under `--features module`).
+#   wasm-packages  Space-separated package names for the wasm-lib job; when set the
+#                  job lints `-p <each>` instead of `--workspace` (a workspace with ONE
+#                  wasm face beside native-only members — ikigai-tutorial's book-wasm
+#                  next to two-hosts, which pulls quinn/mio and cannot build on wasm32).
 #   wasm-check     Job `wasm32 check`: cargo check --workspace on wasm32. Core's
 #                  gate. ⚠ A compile-only wasm gate cannot see a runtime panic —
 #                  `SystemTime::now()` compiles on wasm and panics when called. It
@@ -105,6 +109,10 @@ on:
         type: string
         default: ""
         description: Features for the wasm-lib job (e.g. `module`)
+      wasm-packages:
+        type: string
+        default: ""
+        description: Packages for the wasm-lib job (space-separated); empty = --workspace
       wasm-check:
         type: boolean
         default: false
@@ -282,10 +290,21 @@ jobs:
           workspaces: ${{ inputs.path }}
           key: wasm-lib
       - name: clippy (wasm32 lib)
-        run: >-
-          cargo clippy --workspace --lib --target wasm32-unknown-unknown
-          ${{ inputs.wasm-features != '' && format('--features {0}', inputs.wasm-features) || '' }}
-          -- -D warnings
+        # `wasm-packages` narrows the lint to the members that HAVE a wasm face; the
+        # default is the whole workspace. Expanded in bash so a list of names becomes
+        # a list of `-p` flags without a YAML expression doing string surgery.
+        env:
+          WASM_PACKAGES: ${{ inputs.wasm-packages }}
+          WASM_FEATURES: ${{ inputs.wasm-features }}
+        run: |
+          scope=(--workspace)
+          if [ -n "${WASM_PACKAGES// /}" ]; then
+            scope=()
+            for pkg in $WASM_PACKAGES; do scope+=(-p "$pkg"); done
+          fi
+          feats=()
+          [ -n "$WASM_FEATURES" ] && feats=(--features "$WASM_FEATURES")
+          cargo clippy "${scope[@]}" --lib --target wasm32-unknown-unknown "${feats[@]}" -- -D warnings
 
   wasm-check:
     name: wasm32 check
