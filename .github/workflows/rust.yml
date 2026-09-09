@@ -59,14 +59,22 @@
 #                  gate. ⚠ A compile-only wasm gate cannot see a runtime panic —
 #                  `SystemTime::now()` compiles on wasm and panics when called. It
 #                  is what it is; say so rather than reading more into green.
-#   macos          Job `clippy · test (macOS)` on macos-latest, plus one macOS job
-#                  per feature set. macOS minutes are FREE on public repos and
-#                  BILLED on private ones (ikigai-secret, ikigai-programs).
+#   macos          Job `clippy · test (macOS, default)` on macos-latest, plus one
+#                  `clippy · test (macOS, <set>)` per feature set. macOS minutes are
+#                  FREE on public repos and BILLED on private ones (ikigai-secret,
+#                  ikigai-programs).
 #
 # CHECK NAMES as a PR sees them (verdict.sh reads these by name): the caller's job
-# id, a slash, the job name here — `ci / fmt · clippy · test`, `ci / doc`,
-# `ci / plan`, `ci / msrv 1.89`, `ci / features: extra`, `ci / wasm32 lib clippy`,
-# `ci / wasm32 check`, `ci / clippy · test (macOS)`. Keep the caller's job id `ci`.
+# id, a slash, the job name here — `ci / plan`, `ci / fmt · clippy · test`,
+# `ci / doc`, `ci / msrv 1.89`, `ci / features: extra`, `ci / wasm32 lib clippy`,
+# `ci / wasm32 check`, `ci / clippy · test (macOS, default)`. Keep the caller's job
+# id `ci`.
+# ⚠ A SKIPPED job's name is shown with its expression UNEVALUATED — a repo with no
+# features sees `ci / features: ${{ matrix.set }}` (skipped), one with no
+# rust-version sees `ci / msrv ${{ needs.plan.outputs.msrv }}` (skipped). Seen on the
+# private-caller probe 2026-09-09. verdict.sh counts skipped as a pass, and the
+# names here are chosen to still read as what they are in that raw form — which is
+# why the macOS name is a plain `(macOS, ${{ matrix.set }})` and not a ternary.
 #
 # Every `run:` here is `shell: bash` explicitly, which gives `-eo pipefail`; the
 # default shell for an unspecified `run:` is `bash -e` WITHOUT pipefail, and the
@@ -304,7 +312,7 @@ jobs:
   # quietly cover less. `default` is a SENTINEL meaning "no feature flags" — cargo
   # rejects `--features default` on a crate that declares no default feature.
   macos:
-    name: "${{ matrix.set == 'default' && 'clippy · test (macOS)' || format('clippy · test (macOS, features: {0})', matrix.set) }}"
+    name: "clippy · test (macOS, ${{ matrix.set }})"
     needs: plan
     if: inputs.macos
     runs-on: macos-latest
