@@ -1,0 +1,15 @@
+[package]
+name = "selftest-wasmlib"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[features]
+extra = []
+
+# A binary hidden from `--all-targets` unless the feature is on: exactly the
+# shape the `features` input exists for.
+[[bin]]
+name = "extra"
+path = "src/bin/extra.rs"
+required-features = ["extra"]

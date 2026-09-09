@@ -1,0 +1,340 @@
+# rust.yml — the ONE Rust CI for every ikigai-rs repository.
+#
+# WHY. Thirty-two repos each carried a hand-copied ci.yml, and the copies drifted:
+# `cancel-in-progress: true` on main (a main commit can go without a verdict), no
+# `cargo doc` gate anywhere, feature-gated targets that `--all-targets` cannot see
+# handled three different ways, an MSRV declared in one repo and tested nowhere.
+# Every one of those is a gate that silently covers less than it looks like it does,
+# and every one recurs because CI is copied. This file is where it is fixed once.
+#
+# A caller's ci.yml is three lines (see the template below). Non-cargo jobs — a
+# walkthrough-anchor check, a JS parity suite, an elisp byte-compile — stay in the
+# caller, unchanged. This file owns the CARGO gates and nothing else.
+#
+#   jobs:
+#     ci:
+#       uses: ikigai-rs/.github/.github/workflows/rust.yml@main
+#       with: { wasm-lib: true }          # only the inputs the repo needs
+#
+# `@main`, DELIBERATELY. One fix here propagates to every repo on its next run —
+# that is the entire point. The cost is that a bad merge to this file breaks every
+# repo at once; it is paid by selftest.yml (this workflow gates itself on every
+# change, on every job it can emit) and by revert being one commit. A tag would mean
+# thirty-two PRs per fix, which is the disease this file cures.
+#
+# FIXED — no input can turn these off:
+#   fmt · clippy · test    fmt --check; clippy --workspace --all-targets -D warnings;
+#                          test --workspace. `--workspace` always: harmless on a
+#                          single crate, and a root-package workspace is otherwise
+#                          linted at the root only.
+#   doc                    RUSTDOCFLAGS=-D warnings cargo doc --workspace --no-deps.
+#                          A broken intra-doc link is a defect in a published crate.
+#                          There is no `doc: false`: a repo that cannot pass fixes its
+#                          docs, or keeps a visibly dated inline exemption that
+#                          `just ci-drift` reports. Never a silent one.
+#   msrv <ver>             AUTOMATIC. If any workspace member declares `rust-version`,
+#                          clippy + test run on that toolchain. No input: the manifest
+#                          is the truth, so the gate cannot drift from it. Skipped
+#                          (visibly) when nothing declares one.
+#
+# INPUTS — all optional, one line of WHY each:
+#   path           Working directory, for a repo whose Cargo project is not at root.
+#   test-args      Appended to EVERY `cargo test` this workflow runs (tutorial needs
+#                  `--all-targets`). ⚠ `--all-targets` silently excludes doctests, so
+#                  when it is present a separate `cargo test --doc` step runs too.
+#   features       Whitespace-separated feature SETS (features within a set are
+#                  comma-separated, as cargo takes them): "migrate", "server
+#                  maintenance", "module". A literal `*` means `--all-features`. Each
+#                  set is one job `features: <set>` running clippy --all-targets and
+#                  test with that set. This is §9c made structural: a target behind
+#                  `required-features` gets an unconditional job, or the caller has
+#                  not listed its feature. A bare feature name applies to every
+#                  member that declares it (cargo errors only when NONE does); use
+#                  `crate/feature` to target one member.
+#   wasm-lib       Job `wasm32 lib clippy`: clippy --workspace --lib on
+#                  wasm32-unknown-unknown. The module crates' gate.
+#   wasm-features  Features for the wasm-lib job only (jsonld and xslt lint their
+#                  wasm face under `--features module`).
+#   wasm-check     Job `wasm32 check`: cargo check --workspace on wasm32. Core's
+#                  gate. ⚠ A compile-only wasm gate cannot see a runtime panic —
+#                  `SystemTime::now()` compiles on wasm and panics when called. It
+#                  is what it is; say so rather than reading more into green.
+#   macos          Job `clippy · test (macOS)` on macos-latest, plus one macOS job
+#                  per feature set. macOS minutes are FREE on public repos and
+#                  BILLED on private ones (ikigai-secret, ikigai-programs).
+#
+# CHECK NAMES as a PR sees them (verdict.sh reads these by name): the caller's job
+# id, a slash, the job name here — `ci / fmt · clippy · test`, `ci / doc`,
+# `ci / plan`, `ci / msrv 1.89`, `ci / features: extra`, `ci / wasm32 lib clippy`,
+# `ci / wasm32 check`, `ci / clippy · test (macOS)`. Keep the caller's job id `ci`.
+#
+# Every `run:` here is `shell: bash` explicitly, which gives `-eo pipefail`; the
+# default shell for an unspecified `run:` is `bash -e` WITHOUT pipefail, and the
+# plan step below is a pipeline whose failure must not read as "no features".
+
+name: rust
+
+on:
+  workflow_call:
+    inputs:
+      path:
+        type: string
+        default: "."
+        description: Working directory of the Cargo project (repo root by default)
+      test-args:
+        type: string
+        default: ""
+        description: Appended to every `cargo test`; `--all-targets` also triggers a doctest step
+      features:
+        type: string
+        default: ""
+        description: Whitespace-separated feature sets, each a job; `*` = --all-features
+      wasm-lib:
+        type: boolean
+        default: false
+        description: Lint the lib on wasm32-unknown-unknown
+      wasm-features:
+        type: string
+        default: ""
+        description: Features for the wasm-lib job (e.g. `module`)
+      wasm-check:
+        type: boolean
+        default: false
+        description: cargo check --workspace on wasm32-unknown-unknown
+      macos:
+        type: boolean
+        default: false
+        description: Also clippy + test on macos-latest (billed on private repos)
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # Turns the inputs and the manifest into the matrix the jobs below consume:
+  # the feature sets as JSON, the same list with a `default` sentinel in front
+  # for the macOS matrix, and the highest `rust-version` any member declares.
+  plan:
+    name: plan
+    runs-on: ubuntu-latest
+    outputs:
+      features: ${{ steps.plan.outputs.features }}
+      macos-sets: ${{ steps.plan.outputs.macos-sets }}
+      msrv: ${{ steps.plan.outputs.msrv }}
+    defaults:
+      run:
+        shell: bash
+        working-directory: ${{ inputs.path }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - id: plan
+        env:
+          FEATURES: ${{ inputs.features }}
+        run: |
+          set -euo pipefail
+          sets="$(jq -cn --arg s "$FEATURES" '$s | [splits("\\s+")] | map(select(length > 0))')"
+          macos_sets="$(jq -cn --argjson s "$sets" '["default"] + $s')"
+          # Highest rust-version across the workspace, compared numerically —
+          # a string max would rank 1.9 above 1.10.
+          msrv="$(cargo metadata --no-deps --format-version 1 \
+                  | jq -r '[.packages[].rust_version // empty | split(".") | map(tonumber)]
+                           | max // empty | map(tostring) | join(".")')"
+          echo "feature sets: $sets"
+          echo "msrv:         ${msrv:-(none declared)}"
+          {
+            echo "features=$sets"
+            echo "macos-sets=$macos_sets"
+            echo "msrv=$msrv"
+          } >> "$GITHUB_OUTPUT"
+
+  check:
+    name: fmt · clippy · test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+        working-directory: ${{ inputs.path }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ${{ inputs.path }}
+      - name: fmt
+        run: cargo fmt --all -- --check
+      - name: clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: test
+        run: cargo test --workspace ${{ inputs.test-args }}
+      # `--all-targets` excludes doctests (cargo's documented behaviour, and the
+      # selftest fixture proves it). A repo that asks for it would otherwise never
+      # run a doctest again, silently.
+      - name: doctests (excluded by --all-targets)
+        if: contains(inputs.test-args, '--all-targets')
+        run: cargo test --workspace --doc
+
+  doc:
+    name: doc
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+        working-directory: ${{ inputs.path }}
+    env:
+      RUSTDOCFLAGS: -D warnings
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ${{ inputs.path }}
+      - name: cargo doc
+        run: cargo doc --workspace --no-deps
+
+  features:
+    name: "features: ${{ matrix.set }}"
+    needs: plan
+    if: needs.plan.outputs.features != '[]'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        set: ${{ fromJSON(needs.plan.outputs.features) }}
+    defaults:
+      run:
+        shell: bash
+        working-directory: ${{ inputs.path }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ${{ inputs.path }}
+          key: features-${{ matrix.set }}
+      - id: flags
+        env:
+          SET: ${{ matrix.set }}
+        run: |
+          if [ "$SET" = "*" ]; then echo "flags=--all-features" >> "$GITHUB_OUTPUT"
+          else echo "flags=--features $SET" >> "$GITHUB_OUTPUT"; fi
+      - name: clippy (${{ matrix.set }})
+        run: cargo clippy --workspace --all-targets ${{ steps.flags.outputs.flags }} -- -D warnings
+      - name: test (${{ matrix.set }})
+        run: cargo test --workspace ${{ steps.flags.outputs.flags }} ${{ inputs.test-args }}
+
+  msrv:
+    name: msrv ${{ needs.plan.outputs.msrv }}
+    needs: plan
+    if: needs.plan.outputs.msrv != ''
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+        working-directory: ${{ inputs.path }}
+    steps:
+      - uses: actions/checkout@v4
+      # `@master` is the documented form for a dynamic toolchain; `@stable` and
+      # friends are the fixed-version aliases of the same action.
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ needs.plan.outputs.msrv }}
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ${{ inputs.path }}
+          key: msrv
+      - name: clippy (msrv)
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: test (msrv)
+        run: cargo test --workspace ${{ inputs.test-args }}
+
+  wasm-lib:
+    name: wasm32 lib clippy
+    if: inputs.wasm-lib
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+        working-directory: ${{ inputs.path }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ${{ inputs.path }}
+          key: wasm-lib
+      - name: clippy (wasm32 lib)
+        run: >-
+          cargo clippy --workspace --lib --target wasm32-unknown-unknown
+          ${{ inputs.wasm-features != '' && format('--features {0}', inputs.wasm-features) || '' }}
+          -- -D warnings
+
+  wasm-check:
+    name: wasm32 check
+    if: inputs.wasm-check
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+        working-directory: ${{ inputs.path }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ${{ inputs.path }}
+          key: wasm-check
+      - name: check (wasm32)
+        run: cargo check --workspace --target wasm32-unknown-unknown
+
+  # One macOS job for the default feature set, plus one per listed set: a repo whose
+  # Linux gate runs `--all-features` (cli) would otherwise have its macOS gate
+  # quietly cover less. `default` is a SENTINEL meaning "no feature flags" — cargo
+  # rejects `--features default` on a crate that declares no default feature.
+  macos:
+    name: ${{ matrix.set == 'default' && 'clippy · test (macOS)' || format('clippy · test (macOS, features: {0})', matrix.set) }}
+    needs: plan
+    if: inputs.macos
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        set: ${{ fromJSON(needs.plan.outputs.macos-sets) }}
+    defaults:
+      run:
+        shell: bash
+        working-directory: ${{ inputs.path }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ${{ inputs.path }}
+          key: macos-${{ matrix.set }}
+      - id: flags
+        env:
+          SET: ${{ matrix.set }}
+        run: |
+          case "$SET" in
+            default) echo "flags=" >> "$GITHUB_OUTPUT" ;;
+            "*")     echo "flags=--all-features" >> "$GITHUB_OUTPUT" ;;
+            *)       echo "flags=--features $SET" >> "$GITHUB_OUTPUT" ;;
+          esac
+      - name: clippy (macOS)
+        run: cargo clippy --workspace --all-targets ${{ steps.flags.outputs.flags }} -- -D warnings
+      - name: test (macOS)
+        run: cargo test --workspace ${{ steps.flags.outputs.flags }} ${{ inputs.test-args }}

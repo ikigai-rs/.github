@@ -1,0 +1,6 @@
+# The selftest fixture is built locally when you change rust.yml; its output is not
+# a deliverable. No lockfile either: the fixture has no dependencies, and the msrv
+# job resolves on an older cargo whose lock format may differ.
+fixtures/selftest/target/
+fixtures/selftest/Cargo.lock
+.scratch/

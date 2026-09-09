@@ -1,0 +1,9 @@
+[package]
+name = "selftest-doctested"
+version = "0.0.0"
+edition = "2021"
+publish = false
+# The msrv job reads this through `cargo metadata` and runs clippy + test on
+# that toolchain. Old on purpose: the point is that the job installs a
+# toolchain other than stable, not that this code needs anything new.
+rust-version = "1.80"
