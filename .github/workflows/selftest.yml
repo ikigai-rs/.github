@@ -30,6 +30,7 @@ jobs:
       features: "extra *"
       wasm-lib: true
       wasm-features: extra
+      wasm-packages: selftest-wasmlib # the ONE wasm-clean member, by PACKAGE name (not its directory) — exercises the -p path
       wasm-check: true
       macos: true
       test-args: --all-targets
