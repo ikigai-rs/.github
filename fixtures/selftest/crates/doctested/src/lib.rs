@@ -4,7 +4,7 @@
 //! separate step when `test-args` contains `--all-targets`, and this crate is
 //! how the selftest proves that step exists.
 
-/// Doubles a number. See [`hidden`] for the negative.
+/// Doubles a number.
 ///
 /// ```
 /// assert_eq!(selftest_doctested::double(21), 42);
@@ -18,6 +18,3 @@ pub mod n_alias {
     /// The numeric type [`double`](super::double) returns.
     pub type N = u32;
 }
-
-#[allow(dead_code)]
-fn hidden() {}
