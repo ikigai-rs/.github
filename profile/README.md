@@ -18,5 +18,9 @@ under its capability.
   REPL, transports (IPC, QUIC), the MCP projection.
 - The vocabulary is published at [ikigai-rs.dev/ns](https://ikigai-rs.dev/ns) as Turtle
   and as a JSON-LD context.
+- Around it, **43 public repositories**: RDF and SPARQL, XSLT, Markdown, compression,
+  signing and encryption, rate limiting and circuit breakers, accessibility, a persistent
+  store, and language faces for Python and TypeScript. Each is a module the kernel binds,
+  and each describes itself the same way.
 
-Site: [ikigai-rs.dev](https://ikigai-rs.dev) · Pre-alpha · MIT / Apache-2.0
+Site: [ikigai-rs.dev](https://ikigai-rs.dev) · Pre-1.0 and in active use · MIT / Apache-2.0
