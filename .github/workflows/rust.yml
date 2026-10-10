@@ -32,6 +32,8 @@
 #                          There is no `doc: false`: a repo that cannot pass fixes its
 #                          docs, or keeps a visibly dated inline exemption that
 #                          `just ci-drift` reports. Never a silent one.
+#                          ⚠ It builds DEFAULT features only, so it never compiles a
+#                          feature-gated module; each `features:` set re-runs it below.
 #   msrv <ver>             AUTOMATIC. If any workspace member declares `rust-version`,
 #                          clippy + test run on that toolchain. No input: the manifest
 #                          is the truth, so the gate cannot drift from it. Skipped
@@ -45,12 +47,14 @@
 #   features       Whitespace-separated feature SETS (features within a set are
 #                  comma-separated, as cargo takes them): "migrate", "server
 #                  maintenance", "module". A literal `*` means `--all-features`. Each
-#                  set is one job `features: <set>` running clippy --all-targets and
-#                  test with that set. This is §9c made structural: a target behind
-#                  `required-features` gets an unconditional job, or the caller has
-#                  not listed its feature. A bare feature name applies to every
-#                  member that declares it (cargo errors only when NONE does); use
-#                  `crate/feature` to target one member.
+#                  set is one job `features: <set>` running clippy --all-targets, test
+#                  AND doc (-D warnings) with that set — a broken intra-doc link inside
+#                  a feature-gated module is invisible to the default `doc` job
+#                  (ikigai-cms-web shipped twelve under `server`). This is §9c made
+#                  structural: a target behind `required-features` gets an
+#                  unconditional job, or the caller has not listed its feature. A bare
+#                  feature name applies to every member that declares it (cargo errors
+#                  only when NONE does); use `crate/feature` to target one member.
 #   wasm-lib       Job `wasm32 lib clippy`: clippy --workspace --lib on
 #                  wasm32-unknown-unknown. The module crates' gate.
 #   wasm-features  Features for the wasm-lib job only (jsonld and xslt lint their
@@ -244,6 +248,10 @@ jobs:
         run: cargo clippy --workspace --all-targets ${{ steps.flags.outputs.flags }} -- -D warnings
       - name: test (${{ matrix.set }})
         run: cargo test --workspace ${{ steps.flags.outputs.flags }} ${{ inputs.test-args }}
+      - name: doc (${{ matrix.set }})
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc --workspace --no-deps ${{ steps.flags.outputs.flags }}
 
   msrv:
     name: msrv ${{ needs.plan.outputs.msrv }}
