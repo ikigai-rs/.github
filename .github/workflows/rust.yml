@@ -71,12 +71,33 @@
 #                  `clippy · test (macOS, <set>)` per feature set. macOS minutes are
 #                  FREE on public repos and BILLED on private ones (ikigai-secret,
 #                  ikigai-programs).
+#   no-default-features
+#                  Job `no default features`: clippy --all-targets, test and doc
+#                  (-D warnings), all `--workspace --no-default-features`, plus the
+#                  wasm32 lib clippy under the same flag when `wasm-lib` is set (scoped
+#                  by `wasm-packages`, WITHOUT `wasm-features`: those are additive and
+#                  would turn back on what this job exists to leave off). For a crate
+#                  whose default feature carries a heavy surface and whose consumers
+#                  take `default-features = false` (ikigai-sexpr's arrangement build,
+#                  ikigai-shacl's subset validator, ikigai-layers' participant): every
+#                  other job here builds the defaults, and the `features` input can add
+#                  features but never remove the default. ⚠ Not combined with any
+#                  `features` set, not run on macOS, not run at the msrv: one leg.
+#   no-default-features-forbid
+#                  Whitespace-separated package names that must NOT appear in that
+#                  build's `cargo tree --workspace -e normal` (host target, normal edges:
+#                  what a consumer links). `*` is a wildcard inside a name (`rudof_*`).
+#                  The point of turning a default off is usually what it keeps OUT, and
+#                  a lint cannot see a dependency creep back in. The check is positive:
+#                  the tree must print and name every workspace member, so a failing
+#                  `cargo tree` cannot read as "absent". Requires `no-default-features:
+#                  true`; given without it, `plan` fails rather than ignore it.
 #
 # CHECK NAMES as a PR sees them (verdict.sh reads these by name): the caller's job
 # id, a slash, the job name here — `ci / plan`, `ci / fmt · clippy · test`,
 # `ci / doc`, `ci / msrv 1.89`, `ci / features: extra`, `ci / wasm32 lib clippy`,
-# `ci / wasm32 check`, `ci / clippy · test (macOS, default)`. Keep the caller's job
-# id `ci`.
+# `ci / wasm32 check`, `ci / clippy · test (macOS, default)`,
+# `ci / no default features`. Keep the caller's job id `ci`.
 # ⚠ A SKIPPED job's name is shown with its expression UNEVALUATED — a repo with no
 # features sees `ci / features: ${{ matrix.set }}` (skipped), one with no
 # rust-version sees `ci / msrv ${{ needs.plan.outputs.msrv }}` (skipped). Seen on the
@@ -125,6 +146,14 @@ on:
         type: boolean
         default: false
         description: Also clippy + test on macos-latest (billed on private repos)
+      no-default-features:
+        type: boolean
+        default: false
+        description: Also clippy, test and doc with --no-default-features (and wasm32 lib clippy if wasm-lib)
+      no-default-features-forbid:
+        type: string
+        default: ""
+        description: Packages (space-separated, `*` wildcard) that must not be in the --no-default-features tree
 
 permissions:
   contents: read
@@ -153,8 +182,16 @@ jobs:
       - id: plan
         env:
           FEATURES: ${{ inputs.features }}
+          NO_DEFAULT: ${{ inputs.no-default-features }}
+          FORBID: ${{ inputs.no-default-features-forbid }}
         run: |
           set -euo pipefail
+          # A forbid list is checked only by the no-default-features job; given alone it
+          # would be ignored without a word, which is the failure this file exists to stop.
+          if [ -n "${FORBID//[[:space:]]/}" ] && [ "$NO_DEFAULT" != "true" ]; then
+            echo "::error::no-default-features-forbid is set but no-default-features is not: nothing would check it. Add \`no-default-features: true\`."
+            exit 1
+          fi
           sets="$(jq -cn --arg s "$FEATURES" '$s | [splits("\\s+")] | map(select(length > 0))')"
           macos_sets="$(jq -cn --argjson s "$sets" '["default"] + $s')"
           # Highest rust-version across the workspace, compared numerically —
@@ -342,6 +379,91 @@ jobs:
           key: wasm-check
       - name: check (wasm32)
         run: cargo check --workspace --target wasm32-unknown-unknown
+
+  # The build a `default-features = false` consumer links. A static name, so the
+  # skipped state reads as what it is (every caller that does not ask sees
+  # `ci / no default features` skipped). No `needs: plan`: the forbid-without-this
+  # refusal lives in plan, and this job has nothing to wait for.
+  no-default-features:
+    name: no default features
+    if: inputs.no-default-features
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+        working-directory: ${{ inputs.path }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+          # Installed unconditionally: a target is seconds, and an expression here that
+          # evaluates to "" is one more thing to get wrong in the file every repo calls.
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ${{ inputs.path }}
+          key: no-default-features
+      - name: clippy (no default features)
+        run: cargo clippy --workspace --all-targets --no-default-features -- -D warnings
+      - name: test (no default features)
+        run: cargo test --workspace --no-default-features ${{ inputs.test-args }}
+      - name: doctests (no default features; excluded by --all-targets)
+        if: contains(inputs.test-args, '--all-targets')
+        run: cargo test --workspace --no-default-features --doc
+      - name: doc (no default features)
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc --workspace --no-deps --no-default-features
+      - name: wasm32 lib clippy (no default features)
+        if: inputs.wasm-lib
+        env:
+          WASM_PACKAGES: ${{ inputs.wasm-packages }}
+        run: |
+          scope=(--workspace)
+          if [ -n "${WASM_PACKAGES// /}" ]; then
+            scope=()
+            for pkg in $WASM_PACKAGES; do scope+=(-p "$pkg"); done
+          fi
+          cargo clippy "${scope[@]}" --lib --target wasm32-unknown-unknown --no-default-features -- -D warnings
+      - name: tree (no default features) links none of the forbidden packages
+        if: inputs.no-default-features-forbid != ''
+        env:
+          FORBID: ${{ inputs.no-default-features-forbid }}
+        run: |
+          # `read -a`, never an unquoted `for p in $FORBID`: that would glob-expand
+          # `rudof_*` against the files in this directory before the check saw it.
+          read -ra pats <<<"$FORBID"
+          alts=()
+          for p in "${pats[@]}"; do
+            if [[ ! $p =~ ^[A-Za-z0-9_*-]+$ ]]; then
+              echo "::error::no-default-features-forbid: \`$p\` is not a package name (letters, digits, _ and -, with * as a wildcard)"
+              exit 1
+            fi
+            alts+=("${p//\*/[A-Za-z0-9_-]*}")
+          done
+          # Positive: the tree must print and must name every workspace member, so a
+          # failing or empty `cargo tree` cannot read as "nothing forbidden".
+          tree="$(cargo tree --workspace --no-default-features -e normal --prefix none)"
+          members="$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[].name')"
+          while IFS= read -r m; do
+            if ! grep -q "^$m " <<<"$tree"; then
+              echo "::error::\`cargo tree --workspace --no-default-features\` does not name workspace member $m; refusing to call the tree clean"
+              exit 1
+            fi
+          done <<<"$members"
+          if [ "${#alts[@]}" -eq 0 ]; then
+            echo "no patterns to check"
+            exit 0
+          fi
+          re="^($(IFS='|'; printf '%s' "${alts[*]}")) "
+          echo "forbidden: $re"
+          if hits="$(grep -E "$re" <<<"$tree")"; then
+            echo "::error::the --no-default-features build links packages listed in no-default-features-forbid:"
+            sort -u <<<"$hits"
+            exit 1
+          fi
+          echo "none of them in the tree"
 
   # One macOS job for the default feature set, plus one per listed set: a repo whose
   # Linux gate runs `--all-features` (cli) would otherwise have its macOS gate

@@ -13,11 +13,31 @@ pub fn extra() -> &'static str {
     "extra"
 }
 
+/// Only compiled with the default feature `heavy`, which links `selftest-heavy`.
+#[cfg(feature = "heavy")]
+pub fn weight() -> u32 {
+    selftest_heavy::weight()
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
     fn adds() {
         assert_eq!(super::add(2, 2), 4);
+    }
+
+    #[cfg(feature = "heavy")]
+    #[test]
+    fn heavy_is_on() {
+        assert_eq!(super::weight(), 7);
+    }
+
+    // Exists only in the `no default features` job's build: the proof that job
+    // compiles a configuration no other job does.
+    #[cfg(not(feature = "heavy"))]
+    #[test]
+    fn built_without_heavy() {
+        assert_eq!(super::add(1, 1), 2);
     }
 
     #[cfg(feature = "extra")]
