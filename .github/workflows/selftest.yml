@@ -4,7 +4,8 @@
 # every repo at once. This runs the reusable workflow, on every push and PR to
 # this repo, against fixtures/selftest with EVERY input switched on — so every
 # job rust.yml can emit runs on every change to it. A PR here merges on a green
-# verdict of exactly the checks a caller would see.
+# verdict of exactly the checks a caller would see. One job beside it,
+# `forbid-not-vacuous`, checks the fixture itself (see its comment).
 #
 # The job id is `ci` on purpose: check names are `<caller job id> / <job name>`,
 # so this run shows the names every migrated repo will show — `ci / doc`,
@@ -34,3 +35,25 @@ jobs:
       wasm-check: true
       macos: true
       test-args: --all-targets
+      no-default-features: true
+      # A name and a wildcard, both matching the fixture's default-only dependency.
+      no-default-features-forbid: "selftest-heavy selftest-hea*"
+
+  # `ci / no default features` proves the forbid list is absent from that build; it is
+  # evidence only if the forbidden package IS in the default build, or the check is green
+  # by vacuity (a renamed fixture crate would leave it passing forever). Not a job rust.yml
+  # can run on itself: it needs to know the fixture.
+  forbid-not-vacuous:
+    name: fixture forbid list is linked by the default build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+        working-directory: fixtures/selftest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: the default tree names selftest-heavy
+        run: |
+          tree="$(cargo tree --workspace -e normal --prefix none)"
+          grep '^selftest-heavy ' <<<"$tree"

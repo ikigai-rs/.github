@@ -4,8 +4,16 @@ version = "0.0.0"
 edition = "2021"
 publish = false
 
+# `heavy` is on by default and links a dependency; `--no-default-features` builds
+# without it, which the `no default features` job lints, tests, documents and checks
+# the tree of (selftest.yml forbids `selftest-heavy` there).
 [features]
+default = ["heavy"]
+heavy = ["dep:selftest-heavy"]
 extra = []
+
+[dependencies]
+selftest-heavy = { path = "../heavy", optional = true }
 
 # A binary hidden from `--all-targets` unless the feature is on: exactly the
 # shape the `features` input exists for.
