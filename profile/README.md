@@ -23,4 +23,5 @@ under its capability.
   store, and language faces for Python and TypeScript. Each is a module the kernel binds,
   and each describes itself the same way.
 
-Site: [ikigai-rs.dev](https://ikigai-rs.dev) · Pre-1.0 and in active use · MIT / Apache-2.0
+Site: [ikigai-rs.dev](https://ikigai-rs.dev) · Pre-1.0 and in active use · MIT / Apache-2.0 ·
+[Security policy](https://github.com/ikigai-rs/.github/blob/main/SECURITY.md)
