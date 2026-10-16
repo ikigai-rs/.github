@@ -23,6 +23,11 @@ concurrency:
   # `cancel-in-progress: true` planted in two repos.
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+# The caller's grant is the ceiling rust.yml narrows from; checkout-credentials.rb
+# requires every workflow here to say it (ledger #1725).
+permissions:
+  contents: read
+
 jobs:
   ci:
     uses: ./.github/workflows/rust.yml
@@ -52,8 +57,27 @@ jobs:
         working-directory: fixtures/selftest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
       - name: the default tree names selftest-heavy
         run: |
           tree="$(cargo tree --workspace -e normal --prefix none)"
           grep '^selftest-heavy ' <<<"$tree"
+
+  # Every job rust.yml runs compiles a caller's lock, so its build scripts and proc macros
+  # see whatever the job left lying around. The checkout's default is to leave the token
+  # in .git/config; this refuses any checkout that does not say otherwise, and any grant
+  # above contents: read (ledger #1725). Static, over every workflow in this repo: the
+  # runtime proof is the checkout log of a caller's run (`persist-credentials: false`,
+  # no extraheader written).
+  checkout-credentials:
+    name: checkout credentials
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: no checkout persists credentials, no grant above contents read
+        shell: bash
+        run: ruby .github/scripts/checkout-credentials.rb
