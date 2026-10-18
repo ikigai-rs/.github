@@ -39,6 +39,7 @@ jobs:
       wasm-packages: selftest-wasmlib # the ONE wasm-clean member, by PACKAGE name (not its directory) — exercises the -p path
       wasm-check: true
       macos: true
+      windows: true
       test-args: --all-targets
       no-default-features: true
       # A name and a wildcard, both matching the fixture's default-only dependency.
