@@ -71,6 +71,21 @@
 #                  `clippy · test (macOS, <set>)` per feature set. macOS minutes are
 #                  FREE on public repos and BILLED on private ones (ikigai-secret,
 #                  ikigai-programs).
+#   windows        Job `clippy · test (Windows, default)` on windows-latest, plus one
+#                  `clippy · test (Windows, <set>)` per feature set: the macos input's
+#                  twin, for a crate with Windows-gated code (a `cfg(windows)` backend
+#                  is compiled and tested by nothing otherwise, §9c). Windows minutes
+#                  are FREE on public repos and BILLED on private ones, at a HIGHER
+#                  per-minute rate than Linux (GitHub has charged Windows at twice the
+#                  Linux rate; macOS is higher still), and a Windows cargo build is
+#                  usually slower than the Linux one, which multiplies it. Check
+#                  GitHub's current pricing before turning it on in a private repo.
+#                  ⚠ The checkout is a stock Windows one: the runner's Git for Windows
+#                  checks text files out with CRLF by default (core.autocrlf), as a
+#                  Windows developer's clone does. That is deliberate, so a test that reads a fixture through
+#                  `include_str!` sees what a Windows user builds; a repo whose bytes
+#                  matter pins them with `eol=lf` in .gitattributes. No fmt here
+#                  (Linux owns fmt, and CRLF would fail it for no defect).
 #   no-default-features
 #                  Job `no default features`: clippy --all-targets, test and doc
 #                  (-D warnings), all `--workspace --no-default-features`, plus the
@@ -97,13 +112,15 @@
 # id, a slash, the job name here — `ci / plan`, `ci / fmt · clippy · test`,
 # `ci / doc`, `ci / msrv 1.89`, `ci / features: extra`, `ci / wasm32 lib clippy`,
 # `ci / wasm32 check`, `ci / clippy · test (macOS, default)`,
-# `ci / no default features`. Keep the caller's job id `ci`.
+# `ci / clippy · test (Windows, default)`, `ci / no default features`. Keep the
+# caller's job id `ci`.
 # ⚠ A SKIPPED job's name is shown with its expression UNEVALUATED — a repo with no
 # features sees `ci / features: ${{ matrix.set }}` (skipped), one with no
 # rust-version sees `ci / msrv ${{ needs.plan.outputs.msrv }}` (skipped). Seen on the
 # private-caller probe 2026-09-09. verdict.sh counts skipped as a pass, and the
 # names here are chosen to still read as what they are in that raw form — which is
-# why the macOS name is a plain `(macOS, ${{ matrix.set }})` and not a ternary.
+# why the macOS and Windows names are a plain `(macOS, ${{ matrix.set }})` and
+# `(Windows, ${{ matrix.set }})`, not a ternary.
 #
 # Every `run:` here is `shell: bash` explicitly, which gives `-eo pipefail`; the
 # default shell for an unspecified `run:` is `bash -e` WITHOUT pipefail, and the
@@ -146,6 +163,10 @@ on:
         type: boolean
         default: false
         description: Also clippy + test on macos-latest (billed on private repos)
+      windows:
+        type: boolean
+        default: false
+        description: Also clippy + test on windows-latest (billed on private repos, at a higher per-minute rate than Linux)
       no-default-features:
         type: boolean
         default: false
@@ -178,7 +199,8 @@ env:
 jobs:
   # Turns the inputs and the manifest into the matrix the jobs below consume:
   # the feature sets as JSON, the same list with a `default` sentinel in front
-  # for the macOS matrix, and the highest `rust-version` any member declares.
+  # for the macOS and Windows matrices (both read `macos-sets`; the name predates
+  # Windows), and the highest `rust-version` any member declares.
   plan:
     name: plan
     runs-on: ubuntu-latest
@@ -535,4 +557,48 @@ jobs:
       - name: clippy (macOS)
         run: cargo clippy --workspace --all-targets ${{ steps.flags.outputs.flags }} -- -D warnings
       - name: test (macOS)
+        run: cargo test --workspace ${{ steps.flags.outputs.flags }} ${{ inputs.test-args }}
+
+  # The macOS job's twin on windows-latest: the default set plus one per listed set, so a
+  # `cfg(windows)` backend is linted and tested under every feature set Linux gates, never
+  # a narrower one. `shell: bash` here is Git Bash, which the runner ships; the flag step
+  # and every cargo line are the macOS job's, so the two cannot drift apart in what they
+  # run. ikigai-cli's `windows-file-names` and `windows-probe` jobs run the same toolchain
+  # and cache actions on this runner. No fmt: see the header (CRLF checkout).
+  windows:
+    name: "clippy · test (Windows, ${{ matrix.set }})"
+    needs: plan
+    if: inputs.windows
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        set: ${{ fromJSON(needs.plan.outputs.macos-sets) }}
+    defaults:
+      run:
+        shell: bash
+        working-directory: ${{ inputs.path }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ${{ inputs.path }}
+          key: windows-${{ matrix.set }}
+      - id: flags
+        env:
+          SET: ${{ matrix.set }}
+        run: |
+          case "$SET" in
+            default) echo "flags=" >> "$GITHUB_OUTPUT" ;;
+            "*")     echo "flags=--all-features" >> "$GITHUB_OUTPUT" ;;
+            *)       echo "flags=--features $SET" >> "$GITHUB_OUTPUT" ;;
+          esac
+      - name: clippy (Windows)
+        run: cargo clippy --workspace --all-targets ${{ steps.flags.outputs.flags }} -- -D warnings
+      - name: test (Windows)
         run: cargo test --workspace ${{ steps.flags.outputs.flags }} ${{ inputs.test-args }}
