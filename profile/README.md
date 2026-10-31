@@ -24,4 +24,5 @@ under its capability.
   and each describes itself the same way.
 
 Site: [ikigai-rs.dev](https://ikigai-rs.dev) · Pre-1.0 and in active use · MIT / Apache-2.0 ·
-[Security policy](https://github.com/ikigai-rs/.github/blob/main/SECURITY.md)
+[Security policy](https://github.com/ikigai-rs/.github/blob/main/SECURITY.md) ·
+[Accessibility](https://github.com/ikigai-rs/.github/blob/main/ACCESSIBILITY.md)
