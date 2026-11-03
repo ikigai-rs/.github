@@ -175,6 +175,10 @@ on:
         type: string
         default: ""
         description: Packages (space-separated, `*` wildcard) that must not be in the --no-default-features tree
+      free-disk:
+        type: boolean
+        default: false
+        description: Delete the runner's preinstalled .NET, Android, GHC and CodeQL (about 30 GB) before the fmt · clippy · test build, for a workspace whose debug build fills the default disk
 
 # CREDENTIALS (ledger #1725). Every job here compiles the caller's lock, so every build
 # script and proc macro in it runs with whatever the job holds. Two rules:
@@ -256,6 +260,16 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+      # ikigai-gonk's debug build with RocksDB rebuilt (oxrocksdb-sys) ran the runner out of disk:
+      # "No space left on device" and a linker bus error on gonk PR 278 (ledger #2969). The
+      # preinstalled SDKs below are unused by any Rust job. Opt-in, so no other repo's job changes.
+      - name: free disk
+        if: inputs.free-disk
+        working-directory: .
+        run: |
+          df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h /
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
