@@ -12,7 +12,7 @@ not a conformance claim. Adapted from the
 | Status | Evaluation in progress. No conformance claim. |
 | Owner | the maintainers of this repository |
 | Report a barrier | [a GitHub issue](https://github.com/ikigai-rs/.github/issues/new?labels=accessibility) with the `accessibility` label; anything security-sensitive through [private vulnerability reporting](https://github.com/ikigai-rs/.github/security/advisories/new) |
-| Last reviewed | 2026-10-31 |
+| Last reviewed | 2026-11-12 |
 
 ## What it emits that people read
 
@@ -46,15 +46,34 @@ Followed, by reading the source; none is pinned by a test:
 
 ## How it is tested
 
-- `selftest.yml` runs the shared workflow against `fixtures/selftest`, which checks that the
-  workflow behaves as intended. It does not check how its output reads.
-- **No automated accessibility checker, browser or assistive technology has been used on this
-  output.**
+Every named check has a result: Pass, Fail or Blocked, with its evidence. A Pass covers only the
+stated check, not overall accessibility. The source reviews below were done on main at `d7a47df`
+on 2026-11-12. This repository has no test of how its output reads; `selftest.yml` runs the shared
+workflow against `fixtures/selftest` and checks that it behaves as intended.
+
+| Check | Result | Evidence |
+|---|---|---|
+| The shared workflow behaves as intended | Pass | `selftest.yml` on main at `d7a47df`, 2026-11-03, success. Checks behavior, not how output reads. That run predates CI's move to rustc 1.100.0 (2026-11-09). |
+| Every error annotation names what is wrong | Pass | Source review of the four `::error::` lines in `.github/workflows/rust.yml` and the one in `.github/scripts/checkout-credentials.rb`. Two state the fix (add `no-default-features: true`; the package-name rule); the forbidden-package and the member-not-named errors name the problem and its consequence, not a step to take. |
+| Meaning not carried by color alone | Pass | Source review: the workflow writes no color of its own; `CARGO_TERM_COLOR: always` colors cargo's lines, each of which starts with its word (`error`, `warning`). |
+| Profile page: one top-level heading, link text names its destination | Pass | Source review of `profile/README.md`: one `#` heading, no "here" or "click here" link text. GitHub's rendering of the page was not checked. |
+| Job names read as words in every repository's checks list | Fail | A job GitHub skips is listed under its unexpanded name: `msrv ${{ needs.plan.outputs.msrv }}`, `features: ${{ matrix.set }}`, `clippy · test (macOS, ${{ matrix.set }})`, `clippy · test (Windows, ${{ matrix.set }})`. Seen in the checks of ikigai-rs repositories' pull requests on 2026-11-12. The names come from `.github/workflows/rust.yml`. |
+| Job-name separator | Fail | Job names use a middle dot (`fmt · clippy · test`); screen readers announce it differently, and some skip it. Source review, not tested. |
+| Browser rendering of the profile page and the checks list | Blocked | No browser evaluation was run; GitHub owns both pages' markup. |
+| Automated accessibility checker | Blocked | No axe or other checker has been run on the profile page or a run's log view. |
+| Manual keyboard | Blocked | No person has navigated the profile page or a checks list from the keyboard for this review. |
+| Screen reader | Blocked | No screen reader has been used on the profile page, a checks list or a log. |
+| Screen magnifier | Blocked | No screen magnifier has been used on this output. |
+| Speech input | Blocked | No speech-input software has been used on this output. |
+| Switch access | Blocked | No switch-access software has been used on this output. |
+| Braille display | Blocked | No braille display has been used on this output. |
 
 ## Known limitations
 
-Found by reading the source on 2026-10-31, not by testing:
+Found by reading the source on 2026-10-31 and 2026-11-12, not by testing:
 
+- A skipped job is listed under its unexpanded name (`msrv ${{ needs.plan.outputs.msrv }}`), so
+  the checks list reads out expression syntax where a word belongs.
 - Job names use a middle dot (`fmt · clippy · test`) as a separator. Screen readers announce it
   differently, and some skip it.
 - Cargo's colored log lines carry ANSI escape codes. GitHub's log viewer renders them; a raw log
@@ -63,8 +82,10 @@ Found by reading the source on 2026-10-31, not by testing:
 ## Contributing
 
 Read this file before changing anything listed above: the profile page, the security policy, a
-job or step name, or a message the workflow writes. Keep meaning in words. Say in the pull request
-what was tested, with what, and what was not.
+job or step name, or a message the workflow writes. Keep meaning in words. In the pull request,
+give each check a row in a Check | Result | Evidence table: Pass, Fail or Blocked, with the test or
+command, the tool and its version, or why it could not run. Keep an unrun check as Blocked, a screen
+reader nobody ran included; never omit it.
 
 ## Reporting a barrier
 
@@ -80,3 +101,4 @@ comfortable sharing them. Anything security-sensitive goes through
 | Date | Change |
 |---|---|
 | 2026-10-31 | First version. |
+| 2026-11-12 | "How it is tested" as a Pass / Fail / Blocked table; skipped jobs' unexpanded names recorded as a Fail. |
