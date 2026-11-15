@@ -41,6 +41,9 @@ jobs:
       macos: true
       windows: true
       test-args: --all-targets
+      # Every input on, free-disk included: its SDK deletion and debug-info settings run here
+      # before ikigai-gonk depends on them.
+      free-disk: true
       no-default-features: true
       # A name and a wildcard, both matching the fixture's default-only dependency.
       no-default-features-forbid: "selftest-heavy selftest-hea*"
