@@ -178,7 +178,7 @@ on:
       free-disk:
         type: boolean
         default: false
-        description: Delete the runner's preinstalled .NET, Android, GHC and CodeQL (about 30 GB) before the fmt · clippy · test build, for a workspace whose debug build fills the default disk
+        description: Delete the runner's preinstalled SDKs (.NET, Android, GHC, CodeQL, Swift, Boost; about 30 GB or more) and build with line-tables-only debug info, before the fmt · clippy · test build, for a workspace whose debug build fills the default disk
 
 # CREDENTIALS (ledger #1725). Every job here compiles the caller's lock, so every build
 # script and proc macro in it runs with whatever the job holds. Two rules:
@@ -268,8 +268,19 @@ jobs:
         working-directory: .
         run: |
           df -h /
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL \
+            /usr/local/.ghcup /usr/share/swift /usr/local/share/boost /opt/microsoft /usr/local/lib/node_modules
+          sudo docker image prune --all --force > /dev/null || true
           df -h /
+      # Debug info is most of a Rust test build's size, and doctests link one binary each. Keep
+      # line tables (panics still name file and line) and drop the rest, for the opted-in repo only:
+      # gonk PR 380 still ran out of disk linking doctests after the SDKs above were gone.
+      - name: smaller debug info
+        if: inputs.free-disk
+        working-directory: .
+        run: |
+          echo "CARGO_PROFILE_DEV_DEBUG=line-tables-only" >> "$GITHUB_ENV"
+          echo "CARGO_PROFILE_TEST_DEBUG=line-tables-only" >> "$GITHUB_ENV"
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
